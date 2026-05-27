@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, master, develop]
   pull_request:
-    branches: [main, develop]
+    branches: [main, master, develop]
 
 jobs:
   analyze-and-test:
@@ -39,8 +39,8 @@ jobs:
       - name: Analyze
         run: flutter analyze --fatal-infos
 
-      - name: Test (engine only — no device required)
-        run: flutter test test/engine/ --coverage
+      - name: Test
+        run: flutter test --coverage
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4
