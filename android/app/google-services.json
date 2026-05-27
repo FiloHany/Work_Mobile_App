@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "793480507287",
+    "project_id": "workattendance-3cb42",
+    "storage_bucket": "workattendance-3cb42.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:793480507287:android:ca950b51213053d3ca5ed2",
+        "android_client_info": {
+          "package_name": "com.example.work_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDe0ofVsdvxUE2Qt6fn3ldrpP7aAjaF5LI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,88 @@
+# ── Miscellaneous ──────────────────────────────────────────────────────────────
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# ── IDEs ───────────────────────────────────────────────────────────────────────
+*.iml
+*.ipr
+*.iws
+.idea/
+# VS Code launch configs are project-specific; keep them if you want
+# .vscode/
+
+# ── Flutter / Dart / Pub ───────────────────────────────────────────────────────
+**/doc/api/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# ── Symbolication & obfuscation ────────────────────────────────────────────────
+app.*.symbols
+app.*.map.json
+
+# ── Android ────────────────────────────────────────────────────────────────────
+/android/app/debug
+/android/app/profile
+/android/app/release
+android/local.properties
+
+# Release signing — NEVER commit keystore or passwords
+android/key.properties
+android/*.jks
+android/*.keystore
+
+# Firebase (Android) — contains project config but no secret keys;
+# add here if you prefer to keep it out of source control
+# android/app/google-services.json
+
+# ── iOS ────────────────────────────────────────────────────────────────────────
+# CocoaPods — dependencies are fetched by `pod install`, not committed
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/Flutter/flutter_export_environment.sh
+ios/Flutter/ephemeral/
+**/ios/Flutter/.last_build_id
+
+# Xcode user-specific data
+ios/Runner.xcworkspace/xcuserdata/
+ios/Runner.xcodeproj/xcuserdata/
+ios/Runner.xcodeproj/project.xcworkspace/xcuserdata/
+**/*.xcworkspace/xcuserdata/
+**/*.xcodeproj/xcuserdata/
+
+# Firebase (iOS) — contains project config but no secret keys;
+# add here if you prefer to keep it out of source control
+# ios/Runner/GoogleService-Info.plist
+
+# ── Environment secrets — use .env.example as template ─────────────────────────
+.env
+
+# ── Supabase local tooling ─────────────────────────────────────────────────────
+supabase/.temp/
+# Dangerous dev-only scripts — keep locally, never in source control
+supabase/clear_all_users.sql
+
+# ── Test / scratch assets & accidental files ───────────────────────────────────
+re.jpeg
+*.png.bak
+# Temp screenshot that can appear in project root from adb screencap
+C*app_screen.png
+
+# ── Codemagic / CI artifacts ───────────────────────────────────────────────────
+codemagic.yaml.bak

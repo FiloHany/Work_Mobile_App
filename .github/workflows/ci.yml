@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  analyze-and-test:
+    name: Analyze & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.27.x'
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Run build_runner (generate Freezed/JSON)
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Create .env for tests
+        run: |
+          cat > .env << 'EOF'
+          SUPABASE_URL=https://placeholder.supabase.co
+          SUPABASE_ANON_KEY=placeholder_anon_key
+          APP_ENV=test
+          FIREBASE_PROJECT_ID=placeholder
+          EOF
+
+      - name: Analyze
+        run: flutter analyze --fatal-infos
+
+      - name: Test (engine only — no device required)
+        run: flutter test test/engine/ --coverage
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage/lcov.info
+          flags: unit
+          fail_ci_if_error: false
