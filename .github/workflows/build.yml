@@ -64,7 +64,12 @@ jobs:
 
       - name: Decode keystore
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/app/keystore.jks
+          # Strip certutil headers/footers (-----BEGIN/END CERTIFICATE-----),
+          # remove all CR, LF and spaces, then decode clean base64.
+          printf '%s' "${{ secrets.KEYSTORE_BASE64 }}" \
+            | grep -v '^-----' \
+            | tr -d '\r\n ' \
+            | base64 -d > android/app/keystore.jks
 
       - name: Create key.properties
         run: |
