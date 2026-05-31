@@ -7,13 +7,18 @@ import 'package:timezone/timezone.dart' as tz;
 
 /// Handles both local (scheduled) and remote (FCM) notifications.
 ///
-/// Architecture:
-///   - Local: flutter_local_notifications — arrival/departure reminders,
-///     missed-check alerts (scheduled on-device daily).
-///   - Remote: FCM — cycle-end warnings, early-leave recommendations,
-///     weekly summaries pushed from backend/edge-function.
+/// All scheduled notifications use AndroidScheduleMode.inexactAllowWhileIdle —
+/// no exact-alarm permission required, works on all Android versions.
 ///
-/// Device tokens are registered in Supabase device_tokens table.
+/// Notification types:
+///   Local immediate : check-in confirmation, check-out summary, test
+///   Local repeating : arrival reminder, departure reminder,
+///                     missed check-in, missed check-out,
+///                     tomorrow preview (daily 20:00),
+///                     weekly summary (Thu 19:00),
+///                     cycle-end warning (12th of month 20:00)
+///   One-time local  : early-leave alert (check-in + 7 h)
+///   Remote (FCM)    : backend-pushed summaries and recommendations
 class NotificationService {
   NotificationService._();
   static final instance = NotificationService._();
@@ -23,27 +28,28 @@ class NotificationService {
 
   // ── Channel IDs ───────────────────────────────────────────────────────────
   static const _channelReminders = 'attendance_reminders';
-  static const _channelAlerts = 'attendance_alerts';
+  static const _channelAlerts    = 'attendance_alerts';
   static const _channelSummaries = 'summaries';
 
   // ── Notification IDs ──────────────────────────────────────────────────────
-  static const _idArrivalReminder = 1;   // manual daily arrival
-  static const _idDepartureReminder = 2; // manual daily departure
-  static const _idMissedCheckin = 3;
-  static const _idMissedCheckout = 4;
-  static const _idEarlyLeaveAlert = 5;   // one-time "you can leave now"
-  // IDs 10–16: smart per-weekday arrival (10=Sun, 11=Mon, …, 16=Sat)
-  static const _smartArrivalBase = 10;
-  // IDs 100–115: repeating missed check-in reminders (up to 16 slots = 8 h)
-  static const _checkInReminderBase = 100;
+  static const _idArrivalReminder   = 1;
+  static const _idDepartureReminder = 2;
+  static const _idMissedCheckin     = 3;
+  static const _idMissedCheckout    = 4;
+  static const _idEarlyLeaveAlert   = 5;
+  static const _idCheckInConfirm    = 6;
+  static const _idCheckOutSummary   = 7;
+  static const _idTomorrowPreview   = 8;
+  static const _idWeeklySummary     = 9;
+  static const _idCycleEndWarning   = 20;
+  // IDs 10–16: smart per-weekday arrival (10=Sun … 16=Sat)
+  static const _smartArrivalBase    = 10;
+  // IDs 100–115: repeating missed check-in slots (8 h × 2 per hour)
+  static const _checkInReminderBase  = 100;
   static const _checkInReminderCount = 16;
 
   // ── Permission guard ──────────────────────────────────────────────────────
-  // Prevents the PlatformException(permissionRequestInProgress) that fires when
-  // requestPermissions() is called multiple times concurrently.  On Android,
-  // only ONE system dialog can be open at a time and both FCM and
-  // flutter_local_notifications request the same POST_NOTIFICATIONS permission.
-  bool _permissionsGranted = false;
+  bool _permissionsGranted  = false;
   bool _requestingPermissions = false;
 
   Future<void> initialize() async {
@@ -69,17 +75,13 @@ class NotificationService {
       FirebaseMessaging.onBackgroundMessage(_fcmBackgroundHandler);
       FirebaseMessaging.onMessage.listen(_onForegroundMessage);
     } catch (e) {
-      // FCM initialization failed - app will continue without push notifications
       debugPrint('FirebaseMessaging init failed: $e');
       _fcm = null;
     }
   }
 
   Future<void> requestPermissions() async {
-    // Already granted — skip entirely so no dialog appears again.
     if (_permissionsGranted) return;
-    // Another call is already waiting for the system dialog — bail out so we
-    // never trigger PlatformException(permissionRequestInProgress).
     if (_requestingPermissions) return;
 
     _requestingPermissions = true;
@@ -88,23 +90,14 @@ class NotificationService {
           AndroidFlutterLocalNotificationsPlugin>();
 
       if (androidPlugin != null) {
-        // Android: use the local-notifications plugin as the single entry point.
-        // Do NOT also call _fcm?.requestPermission() here — both request the
-        // same POST_NOTIFICATIONS permission and trigger a second dialog while
-        // the first is still open, causing permissionRequestInProgress.
-        //
-        // USE_EXACT_ALARM is declared in AndroidManifest.xml and is
-        // auto-granted on API 33+ — no user interaction needed.
-        // SCHEDULE_EXACT_ALARM (API 31-32 fallback) is also declared.
-        // requestExactAlarmsPermission() is intentionally NOT called here:
-        // it would open Settings mid-session and confuse the user.
+        // POST_NOTIFICATIONS is the only permission needed — no exact-alarm
+        // permission required because we use inexactAllowWhileIdle scheduling.
         final granted =
             await androidPlugin.requestNotificationsPermission() ?? false;
         _permissionsGranted = granted;
       } else {
         // iOS / macOS: FCM handles the permission dialog.
-        await _fcm?.requestPermission(
-            alert: true, badge: true, sound: true);
+        await _fcm?.requestPermission(alert: true, badge: true, sound: true);
         _permissionsGranted = true;
       }
     } catch (e) {
@@ -114,8 +107,8 @@ class NotificationService {
     }
   }
 
-  /// Fires an immediate test notification so you can verify the whole pipeline
-  /// (channel setup, icon, sound) works on the current device/emulator.
+  // ── Immediate notifications ───────────────────────────────────────────────
+
   Future<void> showTestNotification() async {
     await _localPlugin.show(
       97,
@@ -125,55 +118,70 @@ class NotificationService {
     );
   }
 
-  /// Schedules a one-time alarm [secondsFromNow] seconds in the future.
-  /// Uses alarmClock mode — shows a clock icon in the status bar and cannot
-  /// be deferred by Doze/battery saver. Returns the exact DateTime it fires.
-  Future<DateTime> scheduleTestAlarm({int secondsFromNow = 5}) async {
+  /// Schedules a one-time test notification [secondsFromNow] seconds from now.
+  /// Uses inexact scheduling — may fire a few seconds late but no permission needed.
+  Future<DateTime> scheduleTestNotification({int secondsFromNow = 5}) async {
     await _localPlugin.cancel(98);
-    final now = tz.TZDateTime.now(tz.local);
+    final now    = tz.TZDateTime.now(tz.local);
     final target = now.add(Duration(seconds: secondsFromNow));
     await _localPlugin.zonedSchedule(
       98,
-      'Test alarm ✓',
-      'Alarm fired ${secondsFromNow}s after you tapped — scheduling is working.',
+      'Test notification ✓',
+      'Scheduled ${secondsFromNow}s ago — notifications are working.',
       target,
       _notifDetails(_channelReminders, 'Attendance Reminders'),
-      androidScheduleMode: AndroidScheduleMode.alarmClock,
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
     );
     return target.toLocal();
   }
 
-  /// Resets permission state — only for use in tests.
-  @visibleForTesting
-  void resetPermissionStateForTest() {
-    _permissionsGranted = false;
-    _requestingPermissions = false;
+  /// Fires immediately when the user checks in.
+  Future<void> showCheckInConfirmation(DateTime checkInTime) async {
+    final h = checkInTime.hour.toString().padLeft(2, '0');
+    final m = checkInTime.minute.toString().padLeft(2, '0');
+    await _localPlugin.show(
+      _idCheckInConfirm,
+      'Checked in ✓',
+      'Session started at $h:$m — have a productive day!',
+      _notifDetails(_channelReminders, 'Attendance Reminders'),
+    );
   }
 
-  /// Exposes guard state — only for use in tests.
-  @visibleForTesting
-  bool get isPermissionsGranted => _permissionsGranted;
+  /// Fires immediately when the user checks out.
+  Future<void> showCheckOutSummary({
+    required Duration worked,
+    required Duration credit,
+  }) async {
+    final workedStr = _fmt(worked);
+    final creditStr = credit.isNegative
+        ? ' · ${_fmt(-credit)} credit debt'
+        : credit.inMinutes > 0
+            ? ' · +${_fmt(credit)} credit earned'
+            : '';
+    await _localPlugin.show(
+      _idCheckOutSummary,
+      'Checked out ✓',
+      '$workedStr logged today$creditStr.',
+      _notifDetails(_channelSummaries, 'Summaries & Tips'),
+    );
+  }
 
-  Future<String?> get fcmToken async => _fcm?.getToken();
-
-  // ── Schedule local reminders ──────────────────────────────────────────────
+  // ── Daily / weekly / cycle scheduled notifications ────────────────────────
 
   Future<void> scheduleArrivalReminder({
     required int hour,
     required int minute,
   }) async {
     await _localPlugin.cancel(_idArrivalReminder);
-    final scheduledTime = _nextInstanceOfTime(hour, minute);
-
     await _localPlugin.zonedSchedule(
       _idArrivalReminder,
       'Time to head in',
       'Don\'t forget to check in today.',
-      scheduledTime,
+      _nextInstanceOfTime(hour, minute),
       _notifDetails(_channelReminders, 'Attendance Reminders'),
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
       matchDateTimeComponents: DateTimeComponents.time,
@@ -185,82 +193,16 @@ class NotificationService {
     required int minute,
   }) async {
     await _localPlugin.cancel(_idDepartureReminder);
-    final scheduledTime = _nextInstanceOfTime(hour, minute);
-
     await _localPlugin.zonedSchedule(
       _idDepartureReminder,
-      'Remember to check out',
-      'Tap to log your departure time.',
-      scheduledTime,
+      'Time to check out',
+      'Don\'t forget to record your departure.',
+      _nextInstanceOfTime(hour, minute),
       _notifDetails(_channelReminders, 'Attendance Reminders'),
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
       matchDateTimeComponents: DateTimeComponents.time,
-    );
-  }
-
-  Future<void> showMissedCheckinAlert() async {
-    await _localPlugin.show(
-      _idMissedCheckin,
-      'Missed check-in?',
-      'You haven\'t checked in today. Submit a correction if needed.',
-      _notifDetails(_channelAlerts, 'Alerts'),
-    );
-  }
-
-  /// Schedules daily repeating reminders every 30 minutes starting at
-  /// [startHour]:[startMinute] until 18:00 (up to [_checkInReminderCount] slots).
-  /// Call [cancelCheckInReminders] when the user checks in.
-  Future<void> scheduleRepeatingCheckInReminders({
-    required int startHour,
-    required int startMinute,
-  }) async {
-    await cancelCheckInReminders();
-    int hour = startHour;
-    int minute = startMinute;
-    for (int i = 0; i < _checkInReminderCount; i++) {
-      if (hour >= 18) break;
-      await _localPlugin.zonedSchedule(
-        _checkInReminderBase + i,
-        'You haven\'t checked in yet',
-        'Open the app to record your attendance.',
-        _nextInstanceOfTime(hour, minute),
-        _notifDetails(_channelAlerts, 'Alerts'),
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-        uiLocalNotificationDateInterpretation:
-            UILocalNotificationDateInterpretation.absoluteTime,
-        matchDateTimeComponents: DateTimeComponents.time,
-      );
-      minute += 30;
-      if (minute >= 60) {
-        minute -= 60;
-        hour++;
-      }
-    }
-  }
-
-  Future<void> cancelCheckInReminders() async {
-    for (int i = 0; i < _checkInReminderCount; i++) {
-      await _localPlugin.cancel(_checkInReminderBase + i);
-    }
-  }
-
-  Future<void> showMissedCheckoutAlert() async {
-    await _localPlugin.show(
-      _idMissedCheckout,
-      'Don\'t forget to check out',
-      'Your attendance session is still open.',
-      _notifDetails(_channelAlerts, 'Alerts'),
-    );
-  }
-
-  Future<void> showEarlyLeaveRecommendation(String message) async {
-    await _localPlugin.show(
-      5,
-      'You can leave early today',
-      message,
-      _notifDetails(_channelSummaries, 'Summaries & Tips'),
     );
   }
 
@@ -275,7 +217,7 @@ class NotificationService {
       'Don\'t forget to record your attendance.',
       _nextInstanceOfTime(hour, minute),
       _notifDetails(_channelAlerts, 'Alerts'),
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
       matchDateTimeComponents: DateTimeComponents.time,
@@ -296,7 +238,7 @@ class NotificationService {
       'Make sure to record your departure time.',
       _nextInstanceOfTime(hour, minute),
       _notifDetails(_channelAlerts, 'Alerts'),
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
       matchDateTimeComponents: DateTimeComponents.time,
@@ -306,31 +248,89 @@ class NotificationService {
   Future<void> cancelMissedCheckoutReminder() =>
       _localPlugin.cancel(_idMissedCheckout);
 
-  Future<void> cancelAll() => _localPlugin.cancelAll();
-
-  Future<void> cancelArrivalReminder() =>
-      _localPlugin.cancel(_idArrivalReminder);
-
-  Future<void> cancelDepartureReminder() =>
-      _localPlugin.cancel(_idDepartureReminder);
-
-  /// Cancels every locally-managed alarm ID so that [_rescheduleLocal] always
-  /// starts from a clean slate regardless of which mode was previously active.
-  Future<void> cancelAllLocalAlarms() async {
-    await _localPlugin.cancel(_idArrivalReminder);
-    await _localPlugin.cancel(_idDepartureReminder);
-    await _localPlugin.cancel(_idMissedCheckin);
-    await _localPlugin.cancel(_idMissedCheckout);
-    for (int i = 0; i < 7; i++) {
-      await _localPlugin.cancel(_smartArrivalBase + i);
-    }
+  /// Daily at 20:00 — reminds the user to check tomorrow's timetable.
+  Future<void> scheduleTomorrowPreview() async {
+    await _localPlugin.cancel(_idTomorrowPreview);
+    await _localPlugin.zonedSchedule(
+      _idTomorrowPreview,
+      "Tomorrow's Schedule",
+      'Open the app to review tomorrow\'s timetable and plan your arrival.',
+      _nextInstanceOfTime(20, 0),
+      _notifDetails(_channelSummaries, 'Summaries & Tips'),
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      uiLocalNotificationDateInterpretation:
+          UILocalNotificationDateInterpretation.absoluteTime,
+      matchDateTimeComponents: DateTimeComponents.time,
+    );
   }
 
-  // ── Smart per-weekday arrival alarms (semester mode) ──────────────────────
+  /// Every Thursday at 19:00 — last working day of the Egyptian work week.
+  Future<void> scheduleWeeklySummary() async {
+    await _localPlugin.cancel(_idWeeklySummary);
+    await _localPlugin.zonedSchedule(
+      _idWeeklySummary,
+      'Weekly Summary',
+      'Check your weekly hours, remaining targets, and cycle progress.',
+      _nextInstanceOfWeekdayAndTime(4, 19, 0), // 4 = Thursday
+      _notifDetails(_channelSummaries, 'Summaries & Tips'),
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      uiLocalNotificationDateInterpretation:
+          UILocalNotificationDateInterpretation.absoluteTime,
+      matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+    );
+  }
 
-  /// Schedules a weekly arrival alarm for each day in [perDay].
-  /// Key = schedule day index (0=Sun … 6=Sat),
-  /// value = (hour, minute) to ring the alarm.
+  /// Every month on the 12th at 20:00 — 3 days before cycle ends on the 15th.
+  Future<void> scheduleCycleEndWarning() async {
+    await _localPlugin.cancel(_idCycleEndWarning);
+    final now = tz.TZDateTime.now(tz.local);
+    var target = tz.TZDateTime(tz.local, now.year, now.month, 12, 20, 0);
+    if (!target.isAfter(now)) {
+      final nextMonth = now.month == 12 ? 1 : now.month + 1;
+      final nextYear  = now.month == 12 ? now.year + 1 : now.year;
+      target = tz.TZDateTime(tz.local, nextYear, nextMonth, 12, 20, 0);
+    }
+    await _localPlugin.zonedSchedule(
+      _idCycleEndWarning,
+      'Work Cycle Closes in 3 Days',
+      'Your cycle ends on the 15th — open the app to check remaining hours.',
+      target,
+      _notifDetails(_channelAlerts, 'Alerts'),
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      uiLocalNotificationDateInterpretation:
+          UILocalNotificationDateInterpretation.absoluteTime,
+      matchDateTimeComponents: DateTimeComponents.dayOfMonthAndTime,
+    );
+  }
+
+  // ── One-time early-leave alert ────────────────────────────────────────────
+
+  Future<void> scheduleEarlyLeaveAlert({
+    required int hour,
+    required int minute,
+  }) async {
+    await _localPlugin.cancel(_idEarlyLeaveAlert);
+    final now    = tz.TZDateTime.now(tz.local);
+    final target = tz.TZDateTime(
+        tz.local, now.year, now.month, now.day, hour, minute);
+    if (!target.isAfter(now)) return;
+    await _localPlugin.zonedSchedule(
+      _idEarlyLeaveAlert,
+      'You can leave now ✓',
+      'You have completed your required hours for today.',
+      target,
+      _notifDetails(_channelSummaries, 'Summaries & Tips'),
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      uiLocalNotificationDateInterpretation:
+          UILocalNotificationDateInterpretation.absoluteTime,
+    );
+  }
+
+  Future<void> cancelEarlyLeaveAlert() =>
+      _localPlugin.cancel(_idEarlyLeaveAlert);
+
+  // ── Smart per-weekday arrival notifications ───────────────────────────────
+
   Future<void> scheduleSmartArrivalAlarms(
     Map<int, ({int hour, int minute})> perDay,
   ) async {
@@ -344,7 +344,7 @@ class NotificationService {
         'Your first session starts soon.',
         scheduled,
         _notifDetails(_channelReminders, 'Attendance Reminders'),
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
         uiLocalNotificationDateInterpretation:
             UILocalNotificationDateInterpretation.absoluteTime,
         matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
@@ -358,34 +358,78 @@ class NotificationService {
     }
   }
 
-  // ── One-time "you can leave now" alert ────────────────────────────────────
+  // ── Repeating missed check-in slots ──────────────────────────────────────
 
-  /// Schedules a single alert today at [hour]:[minute].
-  /// Silently skipped if the time has already passed.
-  Future<void> scheduleEarlyLeaveAlert({
-    required int hour,
-    required int minute,
+  Future<void> scheduleRepeatingCheckInReminders({
+    required int startHour,
+    required int startMinute,
   }) async {
-    await _localPlugin.cancel(_idEarlyLeaveAlert);
-    final now = tz.TZDateTime.now(tz.local);
-    final target =
-        tz.TZDateTime(tz.local, now.year, now.month, now.day, hour, minute);
-    if (!target.isAfter(now)) return;
-    await _localPlugin.zonedSchedule(
-      _idEarlyLeaveAlert,
-      'You can leave now ✓',
-      'You have completed your required hours for today.',
-      target,
-      _notifDetails(_channelSummaries, 'Summaries & Tips'),
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-      uiLocalNotificationDateInterpretation:
-          UILocalNotificationDateInterpretation.absoluteTime,
-      // No matchDateTimeComponents → fires once, not repeating.
-    );
+    await cancelCheckInReminders();
+    int hour = startHour, minute = startMinute;
+    for (int i = 0; i < _checkInReminderCount; i++) {
+      if (hour >= 18) break;
+      await _localPlugin.zonedSchedule(
+        _checkInReminderBase + i,
+        'You haven\'t checked in yet',
+        'Open the app to record your attendance.',
+        _nextInstanceOfTime(hour, minute),
+        _notifDetails(_channelAlerts, 'Alerts'),
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        matchDateTimeComponents: DateTimeComponents.time,
+      );
+      minute += 30;
+      if (minute >= 60) { minute -= 60; hour++; }
+    }
   }
 
-  Future<void> cancelEarlyLeaveAlert() =>
-      _localPlugin.cancel(_idEarlyLeaveAlert);
+  Future<void> cancelCheckInReminders() async {
+    for (int i = 0; i < _checkInReminderCount; i++) {
+      await _localPlugin.cancel(_checkInReminderBase + i);
+    }
+  }
+
+  // ── Bulk cancel ───────────────────────────────────────────────────────────
+
+  Future<void> cancelArrivalReminder()   => _localPlugin.cancel(_idArrivalReminder);
+  Future<void> cancelDepartureReminder() => _localPlugin.cancel(_idDepartureReminder);
+  Future<void> cancelAll()               => _localPlugin.cancelAll();
+
+  /// Cancels every managed scheduled notification so _rescheduleLocal always
+  /// starts from a clean slate. Immediate show() IDs (6, 7, 97, 98) are NOT
+  /// cancelled here — they have already been displayed.
+  Future<void> cancelAllLocalAlarms() async {
+    await _localPlugin.cancel(_idArrivalReminder);
+    await _localPlugin.cancel(_idDepartureReminder);
+    await _localPlugin.cancel(_idMissedCheckin);
+    await _localPlugin.cancel(_idMissedCheckout);
+    await _localPlugin.cancel(_idEarlyLeaveAlert);
+    await _localPlugin.cancel(_idTomorrowPreview);
+    await _localPlugin.cancel(_idWeeklySummary);
+    await _localPlugin.cancel(_idCycleEndWarning);
+    for (int i = 0; i < 7; i++) {
+      await _localPlugin.cancel(_smartArrivalBase + i);
+    }
+    for (int i = 0; i < _checkInReminderCount; i++) {
+      await _localPlugin.cancel(_checkInReminderBase + i);
+    }
+  }
+
+  // ── FCM token ─────────────────────────────────────────────────────────────
+
+  Future<String?> get fcmToken async => _fcm?.getToken();
+
+  // ── Test visibility helpers (tests only) ─────────────────────────────────
+
+  @visibleForTesting
+  void resetPermissionStateForTest() {
+    _permissionsGranted     = false;
+    _requestingPermissions  = false;
+  }
+
+  @visibleForTesting
+  bool get isPermissionsGranted => _permissionsGranted;
 
   // ── Private ───────────────────────────────────────────────────────────────
 
@@ -402,13 +446,13 @@ class NotificationService {
     await plugin?.createNotificationChannel(const AndroidNotificationChannel(
       _channelAlerts,
       'Alerts',
-      description: 'Missed check-in/out alerts',
+      description: 'Missed check-in/out and cycle-end alerts',
       importance: Importance.high,
     ));
     await plugin?.createNotificationChannel(const AndroidNotificationChannel(
       _channelSummaries,
       'Summaries & Tips',
-      description: 'Weekly summaries and smart recommendations',
+      description: 'Weekly summaries, tomorrow preview, and smart tips',
       importance: Importance.defaultImportance,
     ));
   }
@@ -447,12 +491,9 @@ class NotificationService {
     );
   }
 
-  /// Returns the next occurrence of [scheduleDay] (0=Sun … 6=Sat) at [hour]:[minute].
-  /// Uses [DateTimeComponents.dayOfWeekAndTime] so the alarm repeats weekly.
   tz.TZDateTime _nextInstanceOfWeekdayAndTime(
       int scheduleDay, int hour, int minute) {
-    // Schedule system: 0=Sun, 1=Mon … 6=Sat.
-    // TZDateTime weekday: Mon=1 … Sun=7.
+    // Schedule system: 0=Sun … 6=Sat. TZDateTime weekday: Mon=1 … Sun=7.
     final tzWeekday = scheduleDay == 0 ? DateTime.sunday : scheduleDay;
     final now = tz.TZDateTime.now(tz.local);
     var candidate =
@@ -482,27 +523,29 @@ class NotificationService {
 
     final effectiveNow = now ?? tz.TZDateTime.now(location);
     var scheduled = tz.TZDateTime(
-      location,
-      effectiveNow.year,
-      effectiveNow.month,
-      effectiveNow.day,
-      hour,
-      minute,
-    );
+        location, effectiveNow.year, effectiveNow.month, effectiveNow.day,
+        hour, minute);
     if (!scheduled.isAfter(effectiveNow)) {
       scheduled = scheduled.add(const Duration(days: 1));
     }
     return scheduled;
   }
 
+  /// Short duration formatter — e.g. "2h 30m", "45m".
+  static String _fmt(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes % 60;
+    if (h > 0 && m > 0) return '${h}h ${m}m';
+    if (h > 0) return '${h}h';
+    return '${m}m';
+  }
+
   void _onNotificationTap(NotificationResponse response) {
-    // Navigate via router — handled in main.dart via deep link.
     debugPrint('Notification tapped: ${response.payload}');
   }
 
   void _onForegroundMessage(RemoteMessage message) {
     debugPrint('FCM foreground: ${message.notification?.title}');
-    // Show as local notification when app is in foreground.
     if (message.notification != null) {
       _localPlugin.show(
         message.hashCode,

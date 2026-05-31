@@ -108,6 +108,10 @@ class AttendanceNotifier extends StateNotifier<AttendanceState> {
       _refreshTodayResult(session);
       // Cancel "haven't checked in" reminders now that the user has.
       NotificationService.instance.cancelCheckInReminders().ignore();
+      // Confirm check-in via notification.
+      NotificationService.instance
+          .showCheckInConfirmation(session.checkInTime)
+          .ignore();
       // Schedule "you can leave" alert at effectiveCheckIn + standard target.
       final effectiveIn = HoursRuleEngine.roundCheckIn(session.checkInTime);
       final leaveAt = effectiveIn.add(WorkRules.standardDailyTarget);
@@ -155,6 +159,16 @@ class AttendanceNotifier extends StateNotifier<AttendanceState> {
       // User has left — cancel the early-leave alert and departure reminder.
       NotificationService.instance.cancelEarlyLeaveAlert().ignore();
       NotificationService.instance.cancelDepartureReminder().ignore();
+      // Send check-out summary notification.
+      if (completed.checkOutTime != null) {
+        final workedRaw = HoursRuleEngine.roundCheckOut(completed.checkOutTime!)
+            .difference(HoursRuleEngine.roundCheckIn(session.checkInTime));
+        final worked = workedRaw.isNegative ? Duration.zero : workedRaw;
+        NotificationService.instance.showCheckOutSummary(
+          worked: worked,
+          credit: credit,
+        ).ignore();
+      }
       return true;
     } catch (e) {
       state = state.copyWith(isCheckingOut: false, error: e.toString());

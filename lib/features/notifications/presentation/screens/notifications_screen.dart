@@ -26,15 +26,15 @@ class NotificationsScreen extends ConsumerWidget {
     final isSmartMode = semesterMode == SemesterMode.semester;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Alarm & Notification Settings')),
+      appBar: AppBar(title: const Text('Notification Settings')),
       body: async.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text(e.toString())),
         data: (prefs) => ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            // ── Arrival alarm ───────────────────────────────────────────────
-            Text('Arrival Alarm', style: AppTextStyles.headlineSmall),
+            // ── Arrival reminder ────────────────────────────────────────────
+            Text('Arrival Reminder', style: AppTextStyles.headlineSmall),
             const Gap(12),
             if (isSmartMode) ...[
               _SmartAlarmBanner(
@@ -46,7 +46,7 @@ class NotificationsScreen extends ConsumerWidget {
               ),
             ] else ...[
               _SwitchTile(
-                title: 'Arrival reminder',
+                title: 'Arrival notification',
                 subtitle: 'Daily reminder to check in on time',
                 value: prefs.arrivalReminder,
                 onChanged: (v) => ref
@@ -55,7 +55,7 @@ class NotificationsScreen extends ConsumerWidget {
               ),
               if (prefs.arrivalReminder)
                 _TimeTile(
-                  title: 'Alarm time',
+                  title: 'Notification time',
                   time: prefs.arrivalReminderTime,
                   onChanged: (t) => ref
                       .read(notificationPrefsProvider.notifier)
@@ -64,13 +64,13 @@ class NotificationsScreen extends ConsumerWidget {
             ],
             const Gap(24),
 
-            // ── Departure / early-leave alarm ───────────────────────────────
-            Text('Departure Alarm', style: AppTextStyles.headlineSmall),
+            // ── Departure reminder ──────────────────────────────────────────
+            Text('Departure Reminder', style: AppTextStyles.headlineSmall),
             const Gap(4),
             Text(
               isSmartMode
-                  ? 'Fires automatically when you have completed 7 h after check-in.'
-                  : 'A fixed daily reminder to check out.',
+                  ? 'A notification fires automatically when you have completed 7 h after check-in.'
+                  : 'A fixed daily notification to remind you to check out.',
               style:
                   AppTextStyles.bodySmall.copyWith(color: AppColors.textHint),
             ),
@@ -109,7 +109,7 @@ class NotificationsScreen extends ConsumerWidget {
                 color: AppColors.info,
                 text:
                     'Switch to Regular Semester mode in Settings → Semester Mode '
-                    'to enable schedule-optimized alarms.',
+                    'to enable schedule-optimized notifications.',
                 trailing: TextButton(
                   onPressed: () {
                     context.pop();
@@ -182,10 +182,10 @@ class NotificationsScreen extends ConsumerWidget {
                   .update(prefs.copyWith(earlyLeaveRecommendation: v)),
             ),
             // ── Test ────────────────────────────────────────────────────────
-            Text('Test', style: AppTextStyles.headlineSmall),
+            Text('Test Notifications', style: AppTextStyles.headlineSmall),
             const Gap(4),
             Text(
-              'Verify that notifications and alarms reach this device.',
+              'Verify that notifications reach this device correctly.',
               style: AppTextStyles.bodySmall
                   .copyWith(color: AppColors.textHint),
             ),
@@ -234,7 +234,7 @@ class _SmartAlarmBanner extends StatelessWidget {
               const Gap(8),
               Expanded(
                 child: Text(
-                  'Schedule-optimized alarm',
+                  'Schedule-optimized reminder',
                   style: AppTextStyles.labelLarge
                       .copyWith(color: AppColors.primary),
                 ),
@@ -439,7 +439,7 @@ class _NotificationTestPanelState extends State<_NotificationTestPanel> {
     try {
       await NotificationService.instance.requestPermissions();
       final fireAt = await NotificationService.instance
-          .scheduleTestAlarm(secondsFromNow: seconds);
+          .scheduleTestNotification(secondsFromNow: seconds);
 
       if (!mounted) return;
 
@@ -451,8 +451,8 @@ class _NotificationTestPanelState extends State<_NotificationTestPanel> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Alarm set — look for a notification at $h:$m:$s. '
-            'Keep volume up and screen on.',
+            'Notification scheduled for $h:$m:$s — '
+            'swipe down from the top to see it.',
           ),
           duration: const Duration(seconds: 8),
         ),
@@ -507,11 +507,11 @@ class _NotificationTestPanelState extends State<_NotificationTestPanel> {
                     width: 16,
                     height: 16,
                     child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.alarm_outlined, size: 18),
+                : const Icon(Icons.schedule_send_outlined, size: 18),
             label: Text(
               _countdown > 0
-                  ? 'Firing at ${_fireTimeLabel ?? '…'}  ($_countdown s)'
-                  : 'Schedule test alarm (5 s)',
+                  ? 'Sending at ${_fireTimeLabel ?? '…'}  ($_countdown s)'
+                  : 'Send delayed notification (5 s)',
             ),
           ),
         ],

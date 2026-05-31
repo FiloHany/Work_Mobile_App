@@ -174,9 +174,9 @@ class NotificationPrefsNotifier
 
   Future<void> _rescheduleLocal(NotificationPrefs prefs) async {
     final svc = NotificationService.instance;
-    // Cancel every managed alarm ID (including smart IDs 10-16) so there are
-    // never duplicate or stale alarms. alarmSchedulerProvider re-schedules
-    // smart alarms immediately after this method returns (semester mode).
+    // Cancel every managed notification ID so there are never stale duplicates.
+    // alarmSchedulerProvider re-schedules smart arrival notifications right
+    // after this returns when in semester mode.
     await svc.cancelAllLocalAlarms();
 
     // Request once — the service guards against concurrent / duplicate calls.
@@ -206,6 +206,21 @@ class NotificationPrefsNotifier
       var h = p.hour + 2;
       if (h >= 24) h = 18;
       await svc.scheduleMissedCheckoutReminder(hour: h, minute: p.minute);
+    }
+
+    // Tomorrow preview: daily at 20:00.
+    if (prefs.tomorrowPreview) {
+      await svc.scheduleTomorrowPreview();
+    }
+
+    // Weekly summary: every Thursday at 19:00.
+    if (prefs.weeklySummary) {
+      await svc.scheduleWeeklySummary();
+    }
+
+    // Cycle-end warning: every month on the 12th at 20:00 (3 days before close).
+    if (prefs.cycleEndWarning) {
+      await svc.scheduleCycleEndWarning();
     }
   }
 }
