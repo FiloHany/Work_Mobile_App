@@ -47,6 +47,7 @@ class ProfileRepository {
     required String? faculty,
     required String? employeeId,
     required String? phone,
+    List<int> restDays = const [],
   }) async {
     try {
       final data = await _client
@@ -58,6 +59,7 @@ class ProfileRepository {
             'faculty': faculty,
             'employee_id': employeeId,
             'phone': phone,
+            'rest_days': restDays,
             'is_onboarded': true,
           })
           .eq('id', userId)

@@ -58,6 +58,7 @@ class OnboardingNotifier extends StateNotifier<OnboardingState> {
     String? faculty,
     String? employeeId,
     String? phone,
+    List<int> restDays = const [],
   }) async {
     final userId = _auth.state.profile?.id;
     if (userId == null) return false;
@@ -72,6 +73,7 @@ class OnboardingNotifier extends StateNotifier<OnboardingState> {
         faculty: faculty,
         employeeId: employeeId,
         phone: phone,
+        restDays: restDays,
       );
       await _auth.updateProfile(updated);
       state = state.copyWith(isLoading: false, isDone: true);

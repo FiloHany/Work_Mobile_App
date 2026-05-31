@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:gap/gap.dart';
@@ -8,7 +6,6 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/engine/semester_mode.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
-import '../../../../shared/services/notification_service.dart';
 import '../providers/notification_preferences_provider.dart';
 import '../providers/smart_alarm_provider.dart';
 
@@ -181,16 +178,6 @@ class NotificationsScreen extends ConsumerWidget {
                   .read(notificationPrefsProvider.notifier)
                   .update(prefs.copyWith(earlyLeaveRecommendation: v)),
             ),
-            // ── Test ────────────────────────────────────────────────────────
-            Text('Test Notifications', style: AppTextStyles.headlineSmall),
-            const Gap(4),
-            Text(
-              'Verify that notifications reach this device correctly.',
-              style: AppTextStyles.bodySmall
-                  .copyWith(color: AppColors.textHint),
-            ),
-            const Gap(12),
-            _NotificationTestPanel(),
             const Gap(32),
           ],
         ),
@@ -386,136 +373,3 @@ class _TimeTile extends StatelessWidget {
       );
 }
 
-// ── Notification test panel ───────────────────────────────────────────────────
-
-class _NotificationTestPanel extends StatefulWidget {
-  @override
-  State<_NotificationTestPanel> createState() => _NotificationTestPanelState();
-}
-
-class _NotificationTestPanelState extends State<_NotificationTestPanel> {
-  bool _firing = false;
-  bool _scheduling = false;
-  int _countdown = 0;
-  String? _fireTimeLabel;   // e.g. "14:35:08"
-  Timer? _countdownTimer;
-
-  @override
-  void dispose() {
-    _countdownTimer?.cancel();
-    super.dispose();
-  }
-
-  Future<void> _sendNow() async {
-    setState(() => _firing = true);
-    try {
-      await NotificationService.instance.requestPermissions();
-      await NotificationService.instance.showTestNotification();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Sent — swipe down from the top to see it.'),
-            duration: Duration(seconds: 4),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
-      }
-    } finally {
-      if (mounted) setState(() => _firing = false);
-    }
-  }
-
-  Future<void> _scheduleAlarm() async {
-    const seconds = 5;
-    setState(() {
-      _scheduling = true;
-      _countdown = seconds;
-      _fireTimeLabel = null;
-    });
-    try {
-      await NotificationService.instance.requestPermissions();
-      final fireAt = await NotificationService.instance
-          .scheduleTestNotification(secondsFromNow: seconds);
-
-      if (!mounted) return;
-
-      final h = fireAt.hour.toString().padLeft(2, '0');
-      final m = fireAt.minute.toString().padLeft(2, '0');
-      final s = fireAt.second.toString().padLeft(2, '0');
-      setState(() => _fireTimeLabel = '$h:$m:$s');
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Notification scheduled for $h:$m:$s — '
-            'swipe down from the top to see it.',
-          ),
-          duration: const Duration(seconds: 8),
-        ),
-      );
-
-      _countdownTimer?.cancel();
-      _countdownTimer = Timer.periodic(const Duration(seconds: 1), (t) {
-        if (!mounted) { t.cancel(); return; }
-        setState(() => _countdown--);
-        if (_countdown <= 0) {
-          t.cancel();
-          if (mounted) setState(() { _scheduling = false; _fireTimeLabel = null; });
-        }
-      });
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Alarm error: $e')),
-        );
-        setState(() { _scheduling = false; _countdown = 0; _fireTimeLabel = null; });
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.divider),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          OutlinedButton.icon(
-            onPressed: _firing ? null : _sendNow,
-            icon: _firing
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.notifications_outlined, size: 18),
-            label: const Text('Send test notification now'),
-          ),
-          const Gap(8),
-          OutlinedButton.icon(
-            onPressed: _scheduling ? null : _scheduleAlarm,
-            icon: _scheduling
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.schedule_send_outlined, size: 18),
-            label: Text(
-              _countdown > 0
-                  ? 'Sending at ${_fireTimeLabel ?? '…'}  ($_countdown s)'
-                  : 'Send delayed notification (5 s)',
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
