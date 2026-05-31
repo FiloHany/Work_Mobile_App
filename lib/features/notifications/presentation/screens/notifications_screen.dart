@@ -396,7 +396,8 @@ class _NotificationTestPanel extends StatefulWidget {
 class _NotificationTestPanelState extends State<_NotificationTestPanel> {
   bool _firing = false;
   bool _scheduling = false;
-  int _countdown = 0;   // > 0 while waiting for alarm to fire
+  int _countdown = 0;
+  String? _fireTimeLabel;   // e.g. "14:35:08"
   Timer? _countdownTimer;
 
   @override
@@ -413,7 +414,9 @@ class _NotificationTestPanelState extends State<_NotificationTestPanel> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-              content: Text('Sent — pull down from the top to see it.')),
+            content: Text('Sent — swipe down from the top to see it.'),
+            duration: Duration(seconds: 4),
+          ),
         );
       }
     } catch (e) {
@@ -427,40 +430,49 @@ class _NotificationTestPanelState extends State<_NotificationTestPanel> {
   }
 
   Future<void> _scheduleAlarm() async {
-    // Keep the button locked for the full countdown so the user can't
-    // queue up duplicate alarms while waiting for the first one to fire.
     const seconds = 5;
-    setState(() { _scheduling = true; _countdown = seconds; });
+    setState(() {
+      _scheduling = true;
+      _countdown = seconds;
+      _fireTimeLabel = null;
+    });
     try {
       await NotificationService.instance.requestPermissions();
-      await NotificationService.instance
+      final fireAt = await NotificationService.instance
           .scheduleTestAlarm(secondsFromNow: seconds);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Alarm set — pull down from the top in 5 s to see it. '
-              'Make sure your volume is up.',
-            ),
-            duration: Duration(seconds: 6),
+
+      if (!mounted) return;
+
+      final h = fireAt.hour.toString().padLeft(2, '0');
+      final m = fireAt.minute.toString().padLeft(2, '0');
+      final s = fireAt.second.toString().padLeft(2, '0');
+      setState(() => _fireTimeLabel = '$h:$m:$s');
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Alarm set — look for a notification at $h:$m:$s. '
+            'Keep volume up and screen on.',
           ),
-        );
-        // Tick the countdown until it reaches zero
-        _countdownTimer?.cancel();
-        _countdownTimer = Timer.periodic(const Duration(seconds: 1), (t) {
-          if (!mounted) { t.cancel(); return; }
-          setState(() => _countdown--);
-          if (_countdown <= 0) {
-            t.cancel();
-            if (mounted) setState(() => _scheduling = false);
-          }
-        });
-      }
+          duration: const Duration(seconds: 8),
+        ),
+      );
+
+      _countdownTimer?.cancel();
+      _countdownTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+        if (!mounted) { t.cancel(); return; }
+        setState(() => _countdown--);
+        if (_countdown <= 0) {
+          t.cancel();
+          if (mounted) setState(() { _scheduling = false; _fireTimeLabel = null; });
+        }
+      });
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
-        setState(() { _scheduling = false; _countdown = 0; });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Alarm error: $e')),
+        );
+        setState(() { _scheduling = false; _countdown = 0; _fireTimeLabel = null; });
       }
     }
   }
@@ -496,9 +508,11 @@ class _NotificationTestPanelState extends State<_NotificationTestPanel> {
                     height: 16,
                     child: CircularProgressIndicator(strokeWidth: 2))
                 : const Icon(Icons.alarm_outlined, size: 18),
-            label: Text(_countdown > 0
-                ? 'Waiting… $_countdown s'
-                : 'Schedule test alarm (5 s)'),
+            label: Text(
+              _countdown > 0
+                  ? 'Firing at ${_fireTimeLabel ?? '…'}  ($_countdown s)'
+                  : 'Schedule test alarm (5 s)',
+            ),
           ),
         ],
       ),

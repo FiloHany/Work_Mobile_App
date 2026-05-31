@@ -243,17 +243,27 @@ abstract final class WorkOptimizer {
       final spec = specs[i];
       final additional = spec.minAdditional + allocatedExtra[i];
       final targetMinutes = spec.alreadyWorked + additional;
-      final checkIn = spec.effectiveCheckIn;
-      final checkOut = checkIn.add(Duration(minutes: targetMinutes));
+
+      // Ceiling-round check-in to the nearest 15-min boundary — this mirrors
+      // how the college attendance system counts time (e.g. 8:07 → 8:15).
+      final checkIn = _ceilToQuarter(spec.effectiveCheckIn);
+
+      // Compute checkout from the ROUNDED check-in so the displayed window
+      // produces exactly the target recorded minutes.
+      final rawCheckOut = checkIn.add(Duration(minutes: targetMinutes));
       final scheduleEnd = spec.scheduleEnd == null
-          ? checkOut
+          ? rawCheckOut
           : spec.date.add(Duration(minutes: spec.scheduleEnd!));
-      final scheduledOrTargetCheckOut =
-          checkOut.isBefore(scheduleEnd) ? scheduleEnd : checkOut;
-      final recommendedCheckOut =
-          scheduledOrTargetCheckOut.isBefore(now) && spec.isActive
+      final latestOfScheduleOrTarget =
+          rawCheckOut.isBefore(scheduleEnd) ? scheduleEnd : rawCheckOut;
+      final rawRecommendedCheckOut =
+          latestOfScheduleOrTarget.isBefore(now) && spec.isActive
               ? now
-              : scheduledOrTargetCheckOut;
+              : latestOfScheduleOrTarget;
+
+      // Round checkout UP too: 15:31 → 15:45, 15:46 → 16:00.
+      final recommendedCheckOut = _ceilToQuarter(rawRecommendedCheckOut);
+
       final effectiveTarget = recommendedCheckOut
           .difference(checkIn)
           .inMinutes
@@ -296,6 +306,7 @@ abstract final class WorkOptimizer {
         plannedAdditional: effectivePlannedAdditional,
         projectedSurplus: projectedSurplus,
         today: _firstToday(days),
+        remainingDays: remainingDates.length,
       ),
     );
   }
@@ -350,6 +361,17 @@ abstract final class WorkOptimizer {
     );
   }
 
+  /// Rounds [dt] UP to the nearest 15-minute boundary — mirrors the college
+  /// attendance system rounding (e.g. 15:31 → 15:45, 15:46 → 16:00).
+  static DateTime _ceilToQuarter(DateTime dt) {
+    final dayStart = DateTime(dt.year, dt.month, dt.day);
+    final elapsedMin = dt.difference(dayStart).inMinutes;
+    final rem = elapsedMin % 15;
+    if (rem == 0) return DateTime(dt.year, dt.month, dt.day, dt.hour, dt.minute);
+    final ceiled = elapsedMin - rem + 15;
+    return dayStart.add(Duration(minutes: ceiled));
+  }
+
   static List<int> _allocateExtra(List<_DaySpec> specs, int extraPool) {
     if (extraPool <= 0) return List.filled(specs.length, 0);
 
@@ -386,22 +408,55 @@ abstract final class WorkOptimizer {
     required int plannedAdditional,
     required int projectedSurplus,
     required DailyOptimization? today,
+    required int remainingDays,
   }) {
-    if (remainingRequired == 0 && plannedAdditional == 0) {
-      return 'Your cycle target is already covered.';
+    // Cycle already covered by overtime.
+    if (remainingRequired == 0) {
+      if (plannedAdditional == 0) {
+        return 'Cycle target already covered — you are ahead of schedule!';
+      }
+      // Min-stay constraints still require some hours even though target is met.
+      return 'Target already covered by overtime. '
+          'Remaining days still need the minimum ${WorkRules.minimumValidDay.formatted} stay to count as valid.';
     }
+
+    // Active session today.
     if (today != null && today.isActive) {
       final left = today.additionalMinutes;
       if (left == 0) return 'You can check out now and stay on plan.';
-      return 'Work ${Duration(minutes: left).formatted} more today; planned checkout is ${today.recommendedCheckOut.formattedTime}.';
+      return 'Work ${Duration(minutes: left).formatted} more today — '
+          'checkout by ${today.recommendedCheckOut.formattedTime}.';
     }
+
+    // Determine if behind schedule.
+    final isBehind = remainingDays > 0 &&
+        (remainingRequired / remainingDays) >
+            WorkRules.standardDailyTarget.inMinutes;
+
+    if (isBehind) {
+      final avgPerDay = remainingDays > 0
+          ? Duration(minutes: remainingRequired ~/ remainingDays)
+          : Duration.zero;
+      if (today != null) {
+        return 'Behind schedule — start at ${today.recommendedCheckIn.formattedTime} '
+            'and work ${today.target.formatted} today '
+            '(~${avgPerDay.formatted}/day needed to catch up).';
+      }
+      return 'Behind schedule — ~${avgPerDay.formatted}/day needed across '
+          '$remainingDays remaining ${remainingDays == 1 ? 'day' : 'days'} to '
+          'cover ${Duration(minutes: remainingRequired).formatted} remaining.';
+    }
+
     if (today != null) {
-      return 'Start at ${today.recommendedCheckIn.formattedTime} and work ${today.target.formatted} today.';
+      return 'Start at ${today.recommendedCheckIn.formattedTime} '
+          'and work ${today.target.formatted} today.';
     }
     if (projectedSurplus > 0) {
-      return 'Minimum/schedule constraints create ${Duration(minutes: projectedSurplus).formatted} projected surplus.';
+      return 'Schedule/minimum constraints add '
+          '${Duration(minutes: projectedSurplus).formatted} of projected surplus.';
     }
-    return 'Follow the daily plan to cover the remaining cycle target.';
+    return 'Follow the daily plan to cover the remaining '
+        '${Duration(minutes: remainingRequired).formatted} this cycle.';
   }
 
   static DailyOptimization? _firstToday(List<DailyOptimization> days) {

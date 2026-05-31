@@ -92,9 +92,14 @@ class NotificationService {
         // Do NOT also call _fcm?.requestPermission() here — both request the
         // same POST_NOTIFICATIONS permission and trigger a second dialog while
         // the first is still open, causing permissionRequestInProgress.
+        //
+        // USE_EXACT_ALARM is declared in AndroidManifest.xml and is
+        // auto-granted on API 33+ — no user interaction needed.
+        // SCHEDULE_EXACT_ALARM (API 31-32 fallback) is also declared.
+        // requestExactAlarmsPermission() is intentionally NOT called here:
+        // it would open Settings mid-session and confuse the user.
         final granted =
             await androidPlugin.requestNotificationsPermission() ?? false;
-        if (granted) await androidPlugin.requestExactAlarmsPermission();
         _permissionsGranted = granted;
       } else {
         // iOS / macOS: FCM handles the permission dialog.
@@ -121,21 +126,23 @@ class NotificationService {
   }
 
   /// Schedules a one-time alarm [secondsFromNow] seconds in the future.
-  /// Use this to confirm that exact-alarm scheduling fires correctly.
-  Future<void> scheduleTestAlarm({int secondsFromNow = 5}) async {
+  /// Uses alarmClock mode — shows a clock icon in the status bar and cannot
+  /// be deferred by Doze/battery saver. Returns the exact DateTime it fires.
+  Future<DateTime> scheduleTestAlarm({int secondsFromNow = 5}) async {
     await _localPlugin.cancel(98);
-    final target =
-        tz.TZDateTime.now(tz.local).add(Duration(seconds: secondsFromNow));
+    final now = tz.TZDateTime.now(tz.local);
+    final target = now.add(Duration(seconds: secondsFromNow));
     await _localPlugin.zonedSchedule(
       98,
       'Test alarm ✓',
-      'Alarm fired $secondsFromNow s after you tapped — scheduling works.',
+      'Alarm fired ${secondsFromNow}s after you tapped — scheduling is working.',
       target,
       _notifDetails(_channelReminders, 'Attendance Reminders'),
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      androidScheduleMode: AndroidScheduleMode.alarmClock,
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
     );
+    return target.toLocal();
   }
 
   /// Resets permission state — only for use in tests.
