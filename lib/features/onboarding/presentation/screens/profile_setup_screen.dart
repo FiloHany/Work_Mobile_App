@@ -19,7 +19,7 @@ const _fallbackDepartments = [
   'Artificial Intelligence',
   'Computer Science',
   'Data Science',
-  'Scientific Systems',
+  'Cyber Security',
 ];
 
 const _roleInfo = {
