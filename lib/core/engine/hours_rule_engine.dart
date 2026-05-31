@@ -104,13 +104,21 @@ class WeeklySummary {
   final int insufficientDays;
 
   Duration get totalWorked => Duration(minutes: totalWorkedMinutes);
-  Duration get weeklyTarget => WorkRules.standardWeeklyTarget;
+  Duration get weeklyTarget => workingDaysInWeek == 0
+      ? Duration.zero
+      : Duration(
+          minutes: workingDaysInWeek * WorkRules.standardDailyTarget.inMinutes);
 
-  int get remainingMinutes => (weeklyTarget.inMinutes - totalWorkedMinutes)
-      .clamp(0, weeklyTarget.inMinutes);
+  int get remainingMinutes {
+    final target = weeklyTarget.inMinutes;
+    return (target - totalWorkedMinutes).clamp(0, target > 0 ? target : 0);
+  }
 
-  double get progressPercent =>
-      (totalWorkedMinutes / weeklyTarget.inMinutes).clamp(0.0, 1.0);
+  double get progressPercent {
+    final target = weeklyTarget.inMinutes;
+    if (target == 0) return 0;
+    return (totalWorkedMinutes / target).clamp(0.0, 1.0);
+  }
 }
 
 // ─────────────────────────────────────────────

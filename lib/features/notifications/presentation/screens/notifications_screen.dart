@@ -6,7 +6,6 @@ import 'package:gap/gap.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/engine/semester_mode.dart';
-import '../../../../core/router/app_router.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../shared/services/notification_service.dart';
@@ -112,8 +111,11 @@ class NotificationsScreen extends ConsumerWidget {
                     'Switch to Regular Semester mode in Settings → Semester Mode '
                     'to enable schedule-optimized alarms.',
                 trailing: TextButton(
-                  onPressed: () => context.go(Routes.settings),
-                  child: const Text('Settings'),
+                  onPressed: () {
+                    context.pop();
+                    // User can then tap the Settings tab to change semester mode.
+                  },
+                  child: const Text('Go back'),
                 ),
               ),
               const Gap(24),

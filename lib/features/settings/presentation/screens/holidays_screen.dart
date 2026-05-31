@@ -38,32 +38,65 @@ class HolidaysScreen extends ConsumerWidget {
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text(e.toString())),
         data: (data) {
-          if (data.all.isEmpty) {
-            return const Center(
-              child: Text('No holidays found.'),
+          final today = DateTime.now().dateOnly;
+
+          final upcoming = data.all
+              .where((h) => !h.date.isBefore(today))
+              .toList()
+            ..sort((a, b) => a.date.compareTo(b.date));
+
+          if (upcoming.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.celebration_outlined,
+                      size: 64, color: AppColors.textHint),
+                  const Gap(16),
+                  Text('No upcoming holidays',
+                      style: AppTextStyles.headlineSmall),
+                  const Gap(8),
+                  Text(
+                    'All public holidays for this year have passed.',
+                    style: AppTextStyles.bodySmall,
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
             );
           }
 
-          // Group by year.
-          final byYear = <int, List<HolidayInfo>>{};
-          for (final h in data.all) {
-            byYear.putIfAbsent(h.date.year, () => []).add(h);
+          final next = upcoming.first;
+          final daysUntilNext = next.date.difference(today).inDays;
+
+          // Group by "Month YYYY" — skip the first entry since it's in the hero card.
+          final rest = upcoming.skip(1).toList();
+          final byMonth = <String, List<HolidayInfo>>{};
+          for (final h in rest) {
+            final key = DateFormat('MMMM yyyy').format(h.date);
+            byMonth.putIfAbsent(key, () => []).add(h);
           }
-          final years = byYear.keys.toList()..sort();
 
           return ListView(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 40),
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 48),
             children: [
-              _InfoBanner(),
+              _NextHolidayHero(holiday: next, daysAway: daysUntilNext),
               const Gap(20),
-              for (final year in years) ...[
-                _YearHeader(year: year),
-                const Gap(8),
-                ...byYear[year]!.map((h) => _HolidayTile(
-                      holiday: h,
-                      isToday: h.date == DateTime.now().dateOnly,
-                    )),
-                const Gap(16),
+              _InfoBanner(),
+              if (rest.isNotEmpty) ...[
+                const Gap(24),
+                Text('All Upcoming', style: AppTextStyles.captionUppercase),
+                const Gap(10),
+                for (final entry in byMonth.entries) ...[
+                  _MonthHeader(label: entry.key),
+                  const Gap(6),
+                  ...entry.value.map((h) => _HolidayTile(
+                        holiday: h,
+                        isToday: h.date == today,
+                        daysAway: h.date.difference(today).inDays,
+                      )),
+                  const Gap(14),
+                ],
               ],
             ],
           );
@@ -72,6 +105,187 @@ class HolidaysScreen extends ConsumerWidget {
     );
   }
 }
+
+// ── Next-holiday hero card ────────────────────────────────────────────────────
+
+class _NextHolidayHero extends StatelessWidget {
+  const _NextHolidayHero({required this.holiday, required this.daysAway});
+  final HolidayInfo holiday;
+  final int daysAway;
+
+  @override
+  Widget build(BuildContext context) {
+    final isToday = daysAway == 0;
+    final isTomorrow = daysAway == 1;
+    final countdownLabel = isToday
+        ? 'Today!'
+        : isTomorrow
+            ? 'Tomorrow'
+            : 'In $daysAway days';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF1A3A6B), Color(0xFF2A5298)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.celebration_outlined,
+                        color: Colors.white, size: 14),
+                    const Gap(5),
+                    Text(
+                      'Next Holiday',
+                      style: const TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                decoration: BoxDecoration(
+                  color: isToday
+                      ? AppColors.success
+                      : Colors.white.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.3), width: 1),
+                ),
+                child: Text(
+                  countdownLabel,
+                  style: const TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const Gap(18),
+          Text(
+            holiday.name,
+            style: const TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+              color: Colors.white,
+            ),
+          ),
+          const Gap(6),
+          Row(
+            children: [
+              const Icon(Icons.calendar_today_outlined,
+                  color: Color(0xCCFFFFFF), size: 14),
+              const Gap(6),
+              Text(
+                DateFormat('EEEE, d MMMM yyyy').format(holiday.date),
+                style: const TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 14,
+                  color: Color(0xCCFFFFFF),
+                ),
+              ),
+            ],
+          ),
+          if (!isToday) ...[
+            const Gap(18),
+            _CountdownRow(daysAway: daysAway),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _CountdownRow extends StatelessWidget {
+  const _CountdownRow({required this.daysAway});
+  final int daysAway;
+
+  @override
+  Widget build(BuildContext context) {
+    final weeks = daysAway ~/ 7;
+    final days = daysAway % 7;
+
+    return Row(
+      children: [
+        if (weeks > 0) ...[
+          _CountdownUnit(value: weeks, label: weeks == 1 ? 'week' : 'weeks'),
+          const Gap(12),
+        ],
+        if (days > 0 || weeks == 0)
+          _CountdownUnit(value: days, label: days == 1 ? 'day' : 'days'),
+      ],
+    );
+  }
+}
+
+class _CountdownUnit extends StatelessWidget {
+  const _CountdownUnit({required this.value, required this.label});
+  final int value;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(10),
+          border:
+              Border.all(color: Colors.white.withValues(alpha: 0.2)),
+        ),
+        child: Column(
+          children: [
+            Text(
+              '$value',
+              style: const TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 24,
+                fontWeight: FontWeight.w800,
+                color: Colors.white,
+              ),
+            ),
+            Text(
+              label,
+              style: const TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 11,
+                color: Color(0xCCFFFFFF),
+              ),
+            ),
+          ],
+        ),
+      );
+}
+
+// ── Info banner ───────────────────────────────────────────────────────────────
 
 class _InfoBanner extends StatelessWidget {
   @override
@@ -84,6 +298,7 @@ class _InfoBanner extends StatelessWidget {
         border: Border.all(color: AppColors.info.withValues(alpha: 0.2)),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Icon(Icons.info_outline, color: AppColors.info, size: 18),
           const Gap(10),
@@ -101,24 +316,30 @@ class _InfoBanner extends StatelessWidget {
   }
 }
 
-class _YearHeader extends StatelessWidget {
-  const _YearHeader({required this.year});
-  final int year;
+// ── Month header ──────────────────────────────────────────────────────────────
+
+class _MonthHeader extends StatelessWidget {
+  const _MonthHeader({required this.label});
+  final String label;
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(bottom: 4),
-        child: Text(
-          year.toString(),
-          style: AppTextStyles.captionUppercase,
-        ),
+        padding: const EdgeInsets.only(bottom: 2),
+        child: Text(label, style: AppTextStyles.captionUppercase),
       );
 }
 
+// ── Holiday tile ──────────────────────────────────────────────────────────────
+
 class _HolidayTile extends StatelessWidget {
-  const _HolidayTile({required this.holiday, required this.isToday});
+  const _HolidayTile({
+    required this.holiday,
+    required this.isToday,
+    required this.daysAway,
+  });
   final HolidayInfo holiday;
   final bool isToday;
+  final int daysAway;
 
   @override
   Widget build(BuildContext context) {
@@ -141,6 +362,7 @@ class _HolidayTile extends StatelessWidget {
       ),
       child: Row(
         children: [
+          // Date badge
           Container(
             width: 48,
             height: 48,
@@ -166,13 +388,15 @@ class _HolidayTile extends StatelessWidget {
                     fontFamily: 'Inter',
                     fontWeight: FontWeight.w700,
                     fontSize: 18,
-                    color: isToday ? AppColors.primary : AppColors.textPrimary,
+                    color:
+                        isToday ? AppColors.primary : AppColors.textPrimary,
                   ),
                 ),
               ],
             ),
           ),
           const Gap(14),
+          // Name + full date
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -186,25 +410,45 @@ class _HolidayTile extends StatelessWidget {
               ],
             ),
           ),
-          if (isToday)
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: AppColors.primary,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: const Text(
-                'Today',
-                style: TextStyle(
-                  fontFamily: 'Inter',
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white,
-                ),
-              ),
-            ),
+          const Gap(8),
+          // Countdown chip
+          _DaysChip(daysAway: daysAway, isToday: isToday),
         ],
+      ),
+    );
+  }
+}
+
+class _DaysChip extends StatelessWidget {
+  const _DaysChip({required this.daysAway, required this.isToday});
+  final int daysAway;
+  final bool isToday;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = isToday
+        ? 'Today'
+        : daysAway == 1
+            ? 'Tomorrow'
+            : '${daysAway}d';
+
+    final bg = isToday ? AppColors.primary : AppColors.surfaceVariant;
+    final fg = isToday ? Colors.white : AppColors.textSecondary;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontFamily: 'Inter',
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: fg,
+        ),
       ),
     );
   }

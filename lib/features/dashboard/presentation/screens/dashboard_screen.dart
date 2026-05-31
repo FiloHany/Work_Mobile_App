@@ -215,7 +215,7 @@ class _WeeklyCard extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                '${weekly.totalWorked.formatted} of 35h',
+                '${weekly.totalWorked.formatted} of ${weekly.weeklyTarget.formatted}',
                 style: AppTextStyles.labelSmall,
               ),
               Text(

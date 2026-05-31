@@ -14,13 +14,23 @@ class AppShell extends ConsumerWidget {
     // Keep alarm schedules in sync for the entire logged-in session.
     ref.watch(alarmSchedulerProvider);
 
-    return Scaffold(
-      body: navigationShell,
-      bottomNavigationBar: _BottomNav(
-        currentIndex: navigationShell.currentIndex,
-        onTap: (i) => navigationShell.goBranch(
-          i,
-          initialLocation: i == navigationShell.currentIndex,
+    return PopScope(
+      // Allow normal back-exit only when on the first (Today) tab.
+      // On any other tab, pressing back navigates home first.
+      canPop: navigationShell.currentIndex == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) {
+          navigationShell.goBranch(0, initialLocation: true);
+        }
+      },
+      child: Scaffold(
+        body: navigationShell,
+        bottomNavigationBar: _BottomNav(
+          currentIndex: navigationShell.currentIndex,
+          onTap: (i) => navigationShell.goBranch(
+            i,
+            initialLocation: i == navigationShell.currentIndex,
+          ),
         ),
       ),
     );
