@@ -141,14 +141,11 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
       }
     });
 
-    // Determine department list: prefer DB, fall back to hardcoded.
-    final deptOptions = state.departments.isNotEmpty
-        ? state.departments
-            .map((d) => (id: d.id as String?, name: d.name))
-            .toList()
-        : _fallbackDepartments
-            .map((name) => (id: null as String?, name: name))
-            .toList();
+    // Always use the hardcoded faculty departments — the 4 departments
+    // are fixed for this faculty and should not change with DB data.
+    final deptOptions = _fallbackDepartments
+        .map((name) => (id: null as String?, name: name))
+        .toList();
 
     return Scaffold(
       backgroundColor: AppColors.background,
