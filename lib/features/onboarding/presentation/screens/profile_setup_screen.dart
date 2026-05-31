@@ -16,12 +16,10 @@ import '../../../auth/presentation/providers/auth_provider.dart';
 const _facultyName = 'Faculty of Computer Science & AI';
 
 const _fallbackDepartments = [
-  'Computer Science',
   'Artificial Intelligence',
-  'Information Systems',
-  'Information Technology',
-  'Scientific Computing',
-  'Bioinformatics',
+  'Computer Science',
+  'Data Science',
+  'Scientific Systems',
 ];
 
 const _roleInfo = {
